@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pod-reporter-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pod-reporter
+  template:
+    metadata:
+      labels:
+        app: pod-reporter
+    spec:
+      containers:
+        - name: pod-reporter
+          image: 965106989073.dkr.ecr.us-west-2.amazonaws.com/flink:v1.0
+          ports:
+            - containerPort: 8080
+      serviceAccountName: spark
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pod-reporter-service
+spec:
+  selector:
+    app: pod-reporter
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: LoadBalancer

@@ -50,7 +50,7 @@ func getStatusContent(c echo.Context) error {
 
 func getStatusContentByLabels(c echo.Context) error {
 	namespace := c.Param("namespace")
-	labels := c.QueryParam("labels")
+	labels := c.QueryParams()["label"]
 
 	labelSelector, err := labelsToSelector(labels)
 	if err != nil {
@@ -81,20 +81,16 @@ func getStatusContentByLabels(c echo.Context) error {
 	return fetchPodStatus(pod.Status.PodIP, c.Request().Header.Get("Accept"), c)
 }
 
-func labelsToSelector(labels string) (string, error) {
-	labelPairs := strings.Split(labels, ",")
+func labelsToSelector(labels []string) (string, error) {
 
-	var selectorParts []string
-	for _, pair := range labelPairs {
+	for _, pair := range labels {
 		parts := strings.Split(pair, "=")
 		if len(parts) != 2 {
 			return "", fmt.Errorf("invalid label format: %s", pair)
 		}
-		key, value := parts[0], parts[1]
-		selectorParts = append(selectorParts, fmt.Sprintf("%s=%s", key, value))
 	}
 
-	return strings.Join(selectorParts, ","), nil
+	return strings.Join(labels, ","), nil
 }
 
 func deriveAcceptHeader(acceptHeader string) (string, error) {

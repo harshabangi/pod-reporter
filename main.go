@@ -30,7 +30,6 @@ type statusContent struct {
 func getStatusContent(c echo.Context) error {
 	namespace := c.Param("namespace")
 	podName := c.Param("pod_name")
-	acceptHeader := c.Request().Header.Get("Accept")
 
 	cl, err := NewInClusterKubernetesClient()
 	if err != nil {
@@ -46,27 +45,59 @@ func getStatusContent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusPreconditionFailed, "Pod is not in the 'Running' state")
 	}
 
-	url := fmt.Sprintf("http://%s:8081/status", pod.Status.PodIP)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	acceptHeader, err = deriveAcceptedHeader(acceptHeader)
-	if err != nil {
-		return err
-	}
-
-	switch acceptHeader {
-	case "application/json":
-		return fetchAndRespondJSON(c, url, ctx)
-	case "text/html":
-		return fetchAndRespondHTML(c, url, ctx)
-	default:
-		return echo.NewHTTPError(http.StatusBadRequest, "Unsupported Accept header: "+acceptHeader)
-	}
+	return fetchPodStatus(pod.Status.PodIP, c.Request().Header.Get("Accept"), c)
 }
 
-func deriveAcceptedHeader(acceptHeader string) (string, error) {
+func getStatusContentByLabels(c echo.Context) error {
+	namespace := c.Param("namespace")
+	labels := c.QueryParam("labels")
+
+	labelSelector, err := labelsToSelector(labels)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid labels format: "+err.Error())
+	}
+
+	kubeClient, err := NewInClusterKubernetesClient()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create Kubernetes client: "+err.Error())
+	}
+
+	podList, err := kubeClient.CoreV1().Pods(namespace).List(context.TODO(), meta.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to list pods: "+err.Error())
+	}
+
+	if len(podList.Items) != 1 {
+		return echo.NewHTTPError(http.StatusNotFound, "No matching pods found or multiple pods matched")
+	}
+
+	pod := &podList.Items[0]
+	if pod.Status.Phase != corev1.PodRunning {
+		return echo.NewHTTPError(http.StatusPreconditionFailed, "Pod is not in the 'Running' state")
+	}
+
+	return fetchPodStatus(pod.Status.PodIP, c.Request().Header.Get("Accept"), c)
+}
+
+func labelsToSelector(labels string) (string, error) {
+	labelPairs := strings.Split(labels, ",")
+
+	var selectorParts []string
+	for _, pair := range labelPairs {
+		parts := strings.Split(pair, "=")
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid label format: %s", pair)
+		}
+		key, value := parts[0], parts[1]
+		selectorParts = append(selectorParts, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	return strings.Join(selectorParts, ","), nil
+}
+
+func deriveAcceptHeader(acceptHeader string) (string, error) {
 	if acceptHeader == "" {
 		acceptHeader = "text/html"
 	}
@@ -84,6 +115,27 @@ func deriveAcceptedHeader(acceptHeader string) (string, error) {
 		return "", echo.NewHTTPError(http.StatusNotAcceptable, "Unsupported Accept header: "+acceptHeader)
 	}
 	return acceptHeader, nil
+}
+
+func fetchPodStatus(podIP, acceptHeader string, c echo.Context) error {
+	url := fmt.Sprintf("http://%s:8081/status", podIP)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	acceptHeader, err := deriveAcceptHeader(acceptHeader)
+	if err != nil {
+		return err
+	}
+
+	switch acceptHeader {
+	case "application/json":
+		return fetchAndRespondJSON(c, url, ctx)
+	case "text/html":
+		return fetchAndRespondHTML(c, url, ctx)
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "Unsupported Accept header: "+acceptHeader)
+	}
 }
 
 func fetchAndRespondJSON(c echo.Context, url string, ctx context.Context) error {
@@ -125,5 +177,6 @@ func NewInClusterKubernetesClient() (*kubernetes.Clientset, error) {
 func main() {
 	e := echo.New()
 	e.GET("/v1/namespaces/:namespace/pods/:pod_name/status", getStatusContent)
+	e.GET("/v1/namespaces/:namespace/pods/status", getStatusContentByLabels)
 	e.Logger.Fatal(e.Start(":8080"))
 }

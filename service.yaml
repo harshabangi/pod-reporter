@@ -1,7 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pod-reporter-deployment
+  name: pod-reporter
+  labels:
+    app: pod-reporter
 spec:
   replicas: 1
   selector:
@@ -28,6 +30,6 @@ spec:
     app: pod-reporter
   ports:
     - protocol: TCP
-      port: 80
-      targetPort: 8080
+      port: 8080
+      targetPort: 80
   type: LoadBalancer

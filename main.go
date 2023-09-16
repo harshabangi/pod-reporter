@@ -177,6 +177,6 @@ func NewInClusterKubernetesClient() (*kubernetes.Clientset, error) {
 func main() {
 	e := echo.New()
 	e.GET("/v1/namespaces/:namespace/pods/:pod_name/status", getStatusContent)
-	e.GET("/v1/namespaces/:namespace/pods", getStatusContentByLabels)
+	e.GET("/v1/namespaces/:namespace/pods/status", getStatusContentByLabels)
 	e.Logger.Fatal(e.Start(":8080"))
 }

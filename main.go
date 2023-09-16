@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"github.com/carlmjohnson/requests"
 	"github.com/labstack/echo/v4"
+	corev1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"log"
 	"net/http"
 	"time"
 )
@@ -27,48 +27,72 @@ type statusContent struct {
 }
 
 func getStatusContent(c echo.Context) error {
-	log.Printf("received request with params: %s, %s", c.Param("namespace"), c.Param("pod_name"))
+	namespace := c.Param("namespace")
+	podName := c.Param("pod_name")
+	acceptHeader := c.Request().Header.Get("Accept")
 
-	cl, err := InClusterClient()
+	cl, err := NewInClusterKubernetesClient()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError,
-			fmt.Sprintf("error constructing cluster client: %s", err.Error()),
-		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create Kubernetes client: "+err.Error())
 	}
 
-	pod, err := cl.CoreV1().
-		Pods(c.Param("namespace")).
-		Get(context.TODO(), c.Param("pod_name"), meta.GetOptions{})
-
+	pod, err := cl.CoreV1().Pods(namespace).Get(context.TODO(), podName, meta.GetOptions{})
 	if err != nil {
-		return echo.NewHTTPError(
-			http.StatusInternalServerError, fmt.Sprintf("error getting pod: %s", err.Error()),
-		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get pod information: "+err.Error())
 	}
 
-	var (
-		url      = fmt.Sprintf("http://%s:8081/status", pod.Status.PodIP)
-		response []statusContent
-	)
+	if pod.Status.Phase != corev1.PodRunning {
+		return echo.NewHTTPError(http.StatusPreconditionFailed, "Pod is not in the 'Running' state")
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	url := fmt.Sprintf("http://%s:8081/status", pod.Status.PodIP)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = requests.
-		URL(url).
-		Accept("application/json").
-		ContentType("application/json").
-		ToJSON(&response).
-		Fetch(ctx)
-
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	if acceptHeader == "" {
+		acceptHeader = "text/html"
 	}
 
+	switch acceptHeader {
+	case "application/json":
+		return fetchAndRespondJSON(c, url, ctx)
+	case "text/html":
+		return fetchAndRespondHTML(c, url, ctx)
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "Unsupported Accept header: "+acceptHeader)
+	}
+}
+
+func fetchAndRespondJSON(c echo.Context, url string, ctx context.Context) error {
+	var response []statusContent
+	err := requests.
+		URL(url).
+		Accept("application/json").
+		ToJSON(&response).
+		Fetch(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch status information: "+err.Error())
+	}
+	c.Response().Header().Set("Content-Type", "application/json")
 	return c.JSON(http.StatusOK, response)
 }
 
-func InClusterClient() (*kubernetes.Clientset, error) {
+func fetchAndRespondHTML(c echo.Context, url string, ctx context.Context) error {
+	var htmlContent string
+	err := requests.
+		URL(url).
+		Accept("text/html").
+		ToString(&htmlContent).
+		Fetch(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch status information: "+err.Error())
+	}
+	c.Response().Header().Set("Content-Type", "text/html")
+	return c.HTML(http.StatusOK, htmlContent)
+}
+
+func NewInClusterKubernetesClient() (*kubernetes.Clientset, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err

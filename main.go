@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -50,8 +51,9 @@ func getStatusContent(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if acceptHeader == "" {
-		acceptHeader = "text/html"
+	acceptHeader, err = deriveAcceptedHeader(acceptHeader)
+	if err != nil {
+		return err
 	}
 
 	switch acceptHeader {
@@ -62,6 +64,26 @@ func getStatusContent(c echo.Context) error {
 	default:
 		return echo.NewHTTPError(http.StatusBadRequest, "Unsupported Accept header: "+acceptHeader)
 	}
+}
+
+func deriveAcceptedHeader(acceptHeader string) (string, error) {
+	if acceptHeader == "" {
+		acceptHeader = "text/html"
+	}
+
+	supportedMediaTypes := []string{"text/html", "application/json"}
+	supported := false
+	for _, mt := range supportedMediaTypes {
+		if strings.Contains(acceptHeader, mt) {
+			acceptHeader = mt
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		return "", echo.NewHTTPError(http.StatusNotAcceptable, "Unsupported Accept header: "+acceptHeader)
+	}
+	return acceptHeader, nil
 }
 
 func fetchAndRespondJSON(c echo.Context, url string, ctx context.Context) error {

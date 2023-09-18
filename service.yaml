@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: pod-reporter
-          image: 965106989073.dkr.ecr.us-west-2.amazonaws.com/flink:v4.0
+          image: 965106989073.dkr.ecr.us-west-2.amazonaws.com/flink:v5.0
           ports:
             - containerPort: 8080
       serviceAccountName: spark

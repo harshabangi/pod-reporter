@@ -17,6 +17,12 @@ spec:
       containers:
         - name: pod-reporter
           image: 965106989073.dkr.ecr.us-west-2.amazonaws.com/flink:v5.0
+          resources:
+            limits:
+              memory: 50Mi
+            requests:
+              cpu: 100m
+              memory: 20Mi
           ports:
             - containerPort: 8080
       serviceAccountName: spark
@@ -28,8 +34,31 @@ metadata:
 spec:
   selector:
     app: pod-reporter
+  type: ClusterIP
   ports:
     - protocol: TCP
       port: 8080
-      targetPort: 80
-  type: LoadBalancer
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pod-reporter-ingress
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+  labels:
+    app: pod-reporter
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /v1/namespaces
+            pathType: Prefix
+            backend:
+              service:
+                name: pod-reporter-service
+                port:
+                  number: 8080
